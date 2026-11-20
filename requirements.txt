@@ -1,0 +1,7 @@
+ultralytics
+opencv-python
+numpy
+ftfy
+regex
+tqdm
+git+https://github.com/ultralytics/CLIP.git
