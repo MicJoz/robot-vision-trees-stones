@@ -210,17 +210,33 @@ for img_name in image_files:
         z_dist = CAMERA_HEIGHT_M / np.tan(max(np.deg2rad(2.5), gamma))
         z_dist = float(np.clip(z_dist, 0.5, MAX_ROBOT_RANGE_M))
 
-        # --- 2. KLASYFIKACJA KSZTAŁTU (H/W) I POMIAR ŚREDNICY D [cm] ---
+       # --- 2. KLASYFIKACJA KSZTAŁTU (H/W) I POMIAR ŚREDNICY D [cm] ---
+        v_min, v_max = int(np.min(ys)), int(np.max(ys))
         mask_w = float(np.max(xs) - np.min(xs) + 1)
-        mask_h = float(np.max(ys) - np.min(ys) + 1)
-        aspect_ratio = mask_h / mask_w
+        mask_h = float(v_max - v_min + 1)
 
-        if is_tree_ai and aspect_ratio < 1.80:
-            is_tree = False
-        elif (not is_tree_ai) and aspect_ratio > 2.30:
-            is_tree = True
+        # Szerokość mierzona w środkowym pasie (ignoruje szerokie korzenie u podstawy pnia)
+        v_s = int(v_min + 0.35 * (v_max - v_min))
+        v_e = int(v_min + 0.65 * (v_max - v_min))
+        mid_widths = [np.max(np.where(mask[v, :] == 1)[0]) - np.min(np.where(mask[v, :] == 1)[0])
+                      for v in range(v_s, v_e + 1) if np.sum(mask[v, :]) > 2]
+        mid_w = float(np.median(mid_widths)) if mid_widths else mask_w
+
+        aspect_ratio = mask_h / max(1.0, mid_w)
+        touches_top = (v_min <= int(0.05 * h_img))
+
+        if is_tree_ai:
+            # Nie zamieniaj na kamień, jeśli pień wychodzi poza górę kadru lub YOLO ma dużą pewność
+            if (not touches_top) and (aspect_ratio < 1.55) and (conf < 0.25):
+                is_tree = False
+            else:
+                is_tree = True
         else:
-            is_tree = bool(is_tree_ai)
+            # Zamień na drzewo, jeśli obiekt jest smukły lub pionowo wychodzi poza górę kadru
+            if aspect_ratio > 2.20 or (touches_top and aspect_ratio > 1.30):
+                is_tree = True
+            else:
+                is_tree = False
 
         if is_tree:
             v_min, v_max = np.min(ys), np.max(ys)
@@ -269,7 +285,15 @@ for img_name in image_files:
     print(f"\nPlik: {img_name} (czas: {elapsed_ms:.0f} ms)", flush=True)
     for name_pl, conf, z_dist, diameter_cm, ar in summary:
         print(f"   -> {name_pl:7s} | Pewność: {conf:.2f} | Z: {z_dist:.2f} m | D: {diameter_cm:.1f} cm | H/W: {ar:.2f}", flush=True)
-        csv_rows.append([img_name, name_pl, f"{conf:.2f}", f"{z_dist:.2f}", f"{diameter_cm:.1f}", f"{ar:.2f}", f"{elapsed_ms:.0f}"])
+        csv_rows.append([
+            img_name,
+            name_pl,
+            f"{conf:.2f}".replace(".", ","),
+            f"{z_dist:.2f}".replace(".", ","),
+            f"{diameter_cm:.1f}".replace(".", ","),
+            f"{ar:.2f}".replace(".", ","),
+            f"{elapsed_ms:.0f}"
+        ])
 
 with open(CSV_FILE, mode="w", newline="", encoding="utf-8-sig") as f:
     writer = csv.writer(f, delimiter=";")
